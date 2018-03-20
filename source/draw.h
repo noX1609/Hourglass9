@@ -18,7 +18,7 @@
 #define FONT_WIDTH_EXT 8
 #endif
 
-#define RGB(r,g,b) (r<<24|b<<16|g<<8|r)
+#define RGB(r,g,b) (b<<16|g<<8|r)
 
 #define COLOR_BLACK         RGB(0x00, 0x00, 0x00)
 #define COLOR_WHITE         RGB(0xFF, 0xFF, 0xFF)
@@ -59,14 +59,19 @@
 #define DBG_N_CHARS_Y ((DBG_END_Y - DBG_START_Y) / DBG_STEP_Y)
 #define DBG_N_CHARS_X (((DBG_END_X - DBG_START_X) / FONT_WIDTH) + 1)
 
-#define TOP_SCREEN (u8*)(*(u32*)0x23FFFE00)
-#define BOT_SCREEN (u8*)(*(u32*)0x23FFFE08)
+#define TOP_SCREEN top_screen
+#define BOT_SCREEN bottom_screen
+
+#define ScreenWidth(x)       (((x) == (TOP_SCREEN) ? 400 : 320))
+#define IsCharPartOfWord(x)  (((x) >= 'a' && (x) <= 'z') || ((x) >= '0' && (x) <= '9') || ((x) >= 'A' && (x) <= 'Z'))
+
+extern u8 *top_screen, *bottom_screen;
 
 void ClearScreen(unsigned char *screen, int width, int color);
 void ClearScreenFull(bool clear_top, bool clear_bottom);
 
 void DrawCharacter(unsigned char *screen, int character, int x, int y, int color, int bgcolor);
-void DrawString(unsigned char *screen, const char *str, int x, int y, int color, int bgcolor);
+int  DrawString(unsigned char *screen, const char *str, int x, int y, int color, int bgcolor);
 void DrawStringF(int x, int y, bool use_top, const char *format, ...);
 void DrawStringFC(int x, int y, bool use_top, u32 color, const char *format, ...);
 

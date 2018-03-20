@@ -181,6 +181,7 @@ u32 SystemInfo(u32 param)
     bool isDevkit = (GetUnitKeysType() == KEYS_DEVKIT);
     bool isN3ds = (GetUnitPlatform() == PLATFORM_N3DS);
     bool isA9lh = ((*(u32*) 0x101401C0) == 0);
+    bool isSighax = (!((*(vu8*)0x10000000) & 0x2)) && isA9lh;
     char sd_base_id0[64]; // fill this later
     char sd_base_id1[64]; // fill this later
     u32 key_state = (!CheckKeySlot(0x05, 'Y') << 3) | (!CheckKeySlot(0x25, 'X') << 2) |
@@ -199,6 +200,7 @@ u32 SystemInfo(u32 param)
     u8* nandcid = (u8*) 0x20316000 + 0x400;
     u8* sdcid = (u8*) 0x20316000 + 0x410;
     u8* twlcustid = (u8*) 0x01FFB808;
+    u8* mfg_date = (u8*) 0x01FFB81A;
     
     // Get NAND / SD CID
     sdmmc_get_cid(1, (uint32_t*) nandcid);
@@ -227,6 +229,8 @@ u32 SystemInfo(u32 param)
     // NAND stuff output here
     Debug("NAND type / size: %s %s / %lluMB", (isDevkit) ? "Devkit" : "Retail", (isN3ds) ? "N3DS" : "O3DS", nand_size / 0x100000);
     Debug("Serial / region: %.15s / %s", (char*) serial, (*region < 7) ? regionstr[*region] : regionstr[7]);
+    Debug("Manufacturing date: %u/%02u/%02u", *(mfg_date) + 1900, *(mfg_date + 1), *(mfg_date + 2));
+    // the next 3 bytes are hours, minutes, seconds but those were ommitted due to being superfluous info
     Debug("NAND CID: %08X%08X%08X%08X", getbe32(nandcid+0), getbe32(nandcid+4), getbe32(nandcid+8), getbe32(nandcid+12));
     Debug("TWL customer ID: %08X%08X", getbe32(twlcustid+0), getbe32(twlcustid+4));
     Debug("SysNAND SD path <id0> / <id1>:");
@@ -235,7 +239,7 @@ u32 SystemInfo(u32 param)
     Debug("");
     
     // current setup stuff here
-    Debug("Running from arm9loaderhax: %s", (isA9lh) ? "yes" : "no");
+    Debug("Running from hax: %s", (isSighax) ? "sighax" : (isA9lh) ? "a9lh" : "no");
     Debug("Keys set:%s%s%s%s", (!key_state) ? " none" : (key_state & 0x8) ? " 0x05Y" : "",
         (key_state & 0x4) ? " 0x25X" : "", (key_state & 0x2) ? " 0x18X" : "", (key_state & 0x1) ? " 0x1BX" : "");
     Debug("");

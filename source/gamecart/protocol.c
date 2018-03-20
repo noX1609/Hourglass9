@@ -28,7 +28,6 @@
 #define REG_AESKEYXFIFO (*(vu32*)0x10009104)
 #define REG_AESKEYYFIFO (*(vu32*)0x10009108)
 
-extern u8* bottomScreen;
 
 u32 CartID = 0xFFFFFFFFu;
 u32 CartType = 0;
@@ -86,6 +85,17 @@ int Cart_IsInserted(void)
 u32 Cart_GetID(void)
 {
     return CartID;
+}
+
+void Cart_Reset(void)
+{
+    ResetCartSlot(); //Seems to reset the cart slot?
+
+    REG_CTRCARDSECCNT &= 0xFFFFFFFB;
+    ioDelay2(0x40000);
+
+    SwitchToNTRCARD();
+    ioDelay2(0x40000);
 }
 
 void Cart_Init(void)

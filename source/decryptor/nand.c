@@ -8,15 +8,13 @@
 #include "decryptor/hashfile.h"
 #include "decryptor/keys.h"
 #include "decryptor/nand.h"
+#include "decryptor/nandfat.h" // for serial in NAND backup name
 #include "fatfs/sdmmc.h"
 
 // return values for NAND header check
 #define NAND_HDR_UNK  0 // should be zero
 #define NAND_HDR_O3DS 1 
 #define NAND_HDR_N3DS 2
-
-// these offsets are used by Multi EmuNAND Creator / CakesFW
-#define EMUNAND_MULTI_SECTORS ((getMMCDevice(0)->total_size > 0x200000) ?  0x400000 : 0x200000)
 
 // minimum sizes for O3DS / N3DS NAND
 // see: http://3dbrew.org/wiki/Flash_Filesystem
@@ -73,12 +71,21 @@ static u32 emunand_header = 0;
 static u32 emunand_offset = 0;
 
 
+u32 GetEmuNandMultiSectors(void)
+{
+    u8* buffer = BUFFER_ADDRESS;
+    u32 compact_sectors = align(1 + (NAND_MIN_SIZE / NAND_SECTOR_SIZE), 0x2000);
+    u32 legacy_sectors = (getMMCDevice(0)->total_size > 0x200000) ? 0x400000 : 0x200000;
+    sdmmc_sdcard_readsectors(compact_sectors + 1, 1, buffer);
+    return (IS_NAND_HEADER(buffer)) ? compact_sectors : legacy_sectors;
+}
+
 u32 CheckEmuNand(void)
 {
     u8* buffer = BUFFER_ADDRESS;
     u32 nand_size_sectors = getMMCDevice(0)->total_size;
     u32 nand_size_sectors_min = NAND_MIN_SIZE / NAND_SECTOR_SIZE;
-    u32 multi_sectors = EMUNAND_MULTI_SECTORS;
+    u32 multi_sectors = GetEmuNandMultiSectors();
     u32 ret = EMUNAND_NOT_READY;
 
     // check the MBR for presence of a hidden partition
@@ -115,11 +122,12 @@ u32 SetNand(bool set_emunand, bool force_emunand)
         
         for (emunand_count = 0; (emunand_state >> (2 * emunand_count)) & 0x3; emunand_count++);
         if (emunand_count > 1) { // multiple EmuNANDs -> use selector
+            u32 multi_sectors = GetEmuNandMultiSectors();
             u32 emunand_no = 0;
             DebugColor(COLOR_ASK, "Use arrow keys and <A> to choose EmuNAND");
             while (true) {
                 u32 emunandn_state = (emunand_state >> (2 * emunand_no)) & 0x3;
-                offset_sector = emunand_no * EMUNAND_MULTI_SECTORS;
+                offset_sector = emunand_no * multi_sectors;
                 DebugColor(COLOR_SELECT, "\rEmuNAND #%u: %s", emunand_no, (emunandn_state == EMUNAND_READY) ? "EmuNAND ready" : (emunandn_state == EMUNAND_GATEWAY) ? "GW EmuNAND" : "RedNAND");
                 // user input routine
                 u32 pad_state = InputWait();
@@ -397,7 +405,8 @@ static u32 CheckNandDumpIntegrity(const char* path, bool check_firm) {
 }
 
 u32 OutputFileNameSelector(char* filename, const char* basename, char* extension) {
-    char bases[3][64] = { 0 };
+    char bases[4][64] = { 0 };
+    char serial[16] = { 0 };
     char* dotpos = NULL;
     
     // build first base name and extension
@@ -411,11 +420,12 @@ u32 OutputFileNameSelector(char* filename, const char* basename, char* extension
     }
     
     // build other two base names
-    snprintf(bases[1], 63, "%s_%s", bases[0], (emunand_header) ? "emu" : "sys");
-    snprintf(bases[2], 63, "%s%s" , (emunand_header) ? "emu" : "sys", bases[0]);
+    snprintf(bases[1], 63, "%s_%s", (GetSerial(serial) == 0) ? serial : "UNK", bases[0]);
+    snprintf(bases[2], 63, "%s_%s", bases[0], (emunand_header) ? "emu" : "sys");
+    snprintf(bases[3], 63, "%s%s" , (emunand_header) ? "emu" : "sys", bases[0]);
     
     u32 fn_id = (emunand_header) ? 1 : 0;
-    u32 fn_num = (emunand_header) ? (emunand_offset / EMUNAND_MULTI_SECTORS) : 0;
+    u32 fn_num = 0;
     bool exists = false;
     char extstr[16] = { 0 };
     if (extension)
@@ -432,9 +442,9 @@ u32 OutputFileNameSelector(char* filename, const char* basename, char* extension
         // user input routine
         u32 pad_state = InputWait();
         if (pad_state & BUTTON_DOWN) { // increment filename id
-            fn_id = (fn_id + 1) % 3;
+            fn_id = (fn_id + 1) % 4;
         } else if (pad_state & BUTTON_UP) { // decrement filename id
-            fn_id = (fn_id > 0) ? fn_id - 1 : 2;
+            fn_id = (fn_id > 0) ? fn_id - 1 : 3;
         } else if ((pad_state & BUTTON_RIGHT) && (fn_num < 9)) { // increment number
             fn_num++;
         } else if ((pad_state & BUTTON_LEFT) && (fn_num > 0)) { // decrement number
@@ -700,7 +710,7 @@ u32 DumpNand(u32 param)
         }
         sha_update(buffer, NAND_SECTOR_SIZE * read_sectors);
     }
-
+    if (FileGetSize() < NAND_MIN_SIZE) result = 1; // very improbable
     ShowProgress(0, 0);
     FileClose();
     
@@ -894,7 +904,7 @@ u32 RestoreNand(u32 param)
     
     // check EmuNAND partition size
     if (emunand_header) {
-        if (((NumHiddenSectors() - emunand_offset) * NAND_SECTOR_SIZE < NAND_MIN_SIZE) || (NumHiddenSectors() < emunand_header)) {
+        if (((NumHiddenSectors() - emunand_offset) < (NAND_MIN_SIZE / NAND_SECTOR_SIZE)) || (NumHiddenSectors() < emunand_header)) {
             Debug("Error: Not enough space in EmuNAND partition");
             return 1; // this really should not happen
         } else if (emunand_offset + getMMCDevice(0)->total_size > NumHiddenSectors()) {
@@ -1238,7 +1248,7 @@ u32 InjectGbaVcSave(u32 param)
     
     // get the save from file
     Debug("Encrypting & Injecting GBA VC Save...");
-    if (InputFileNameSelector(filename, "gbavc.sav", NULL, NULL, 0, save_size, false) != 0)
+    if (InputFileNameSelector(filename, "gbavc.sav", NULL, NULL, 0, save_size, true) != 0)
         return 1;
     if (FileGetData(filename, agbsave + 0x200, save_size, 0) != save_size)
         return 1;
@@ -1349,8 +1359,8 @@ u32 DecryptFirmArm9Mem(u8* firm, u32 f_size)
     memcpy(info.ctr, arm9bin + 0x20, 16);
     CryptBuffer(&info);
     
-    // recalculate section 2 hash
-    sha_quick(firm + 0x40 + 0x10 + (0x30*2), arm9bin, bin_size, SHA256_MODE);
+    // recalculate section hash
+    sha_quick(firm + 0x40 + 0x10 + (0x30*section), arm9bin, bin_size, SHA256_MODE);
     
     // mark FIRM as decrypted
     memcpy(firm, (u8*) "FIRMDEC", 7);
